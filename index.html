@@ -1,0 +1,772 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>X-Ray Mirror</title>
+<style>
+:root{
+  --bg:#060a11; --panel:#0d1420; --panel2:#111b2b; --line:#1d2b43;
+  --fg:#dce8f8; --mut:#7e92b0; --acc:#6cc4ff; --acc-ink:#04243d; --warn:#ffb86b;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;background:var(--bg);color:var(--fg);
+  font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button{font:inherit;color:inherit}
+.app{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:12px;padding:12px;min-height:100vh;align-items:start}
+.stagewrap{min-width:0;display:flex;justify-content:center}
+.stage{
+  --ar:1.7778; --maxh:calc(100vh - 24px);
+  position:relative;background:#000;border-radius:14px;overflow:hidden;
+  width:min(100%,calc(var(--maxh) * var(--ar)));aspect-ratio:var(--ar);
+  border:1px solid var(--line);
+}
+.stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.stage video{object-fit:cover}
+.stage.mirror video{transform:scaleX(-1)}
+.xr{position:absolute;inset:0;isolation:isolate;display:none}
+.xr .tint{position:absolute;inset:0;background:#2f86ff;mix-blend-mode:color;pointer-events:none}
+.xr .scan{position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.14) 0 1px,transparent 1px 3px);
+  box-shadow:inset 0 0 90px 20px rgba(0,8,30,.7)}
+.chip{position:absolute;left:10px;bottom:10px;max-width:calc(100% - 70px);padding:6px 10px;border-radius:999px;
+  background:rgba(6,10,17,.78);border:1px solid var(--line);font-size:12px;color:var(--fg)}
+.chip.warn{color:var(--warn)}
+.fs{position:absolute;right:10px;bottom:10px;width:38px;height:38px;border-radius:10px;border:1px solid var(--line);
+  background:rgba(6,10,17,.78);cursor:pointer;font-size:18px;line-height:1}
+.gate{position:absolute;inset:0;display:grid;place-items:center;padding:20px;
+  background:radial-gradient(circle at 50% 40%,#0f2038 0,#060a11 70%)}
+.gate .box{max-width:420px;text-align:center;display:grid;gap:14px;justify-items:center}
+.gate h1{margin:0;font-size:26px;letter-spacing:.02em;font-weight:650}
+.gate p{margin:0;color:var(--mut)}
+.gate .err{color:var(--warn)}
+.btn{background:var(--acc);color:var(--acc-ink);border:0;border-radius:10px;padding:11px 20px;font-weight:650;cursor:pointer}
+.btn:focus-visible,.seg button:focus-visible,.ghost:focus-visible,.fs:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.ghost{background:transparent;border:1px solid var(--line);border-radius:9px;padding:8px 12px;cursor:pointer;color:var(--fg)}
+.ghost:hover{border-color:var(--acc)}
+.panel{display:grid;gap:10px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;gap:10px}
+.card h2{margin:0;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);font-weight:600}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button{flex:1 1 auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 10px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--acc);color:var(--acc-ink);border-color:var(--acc);font-weight:650}
+.checks{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px}
+.checks label,.check{display:flex;align-items:center;gap:8px;cursor:pointer}
+.sw{width:8px;height:8px;border-radius:50%;flex:none}
+input[type=checkbox]{accent-color:var(--acc);width:16px;height:16px;margin:0}
+.row{display:grid;grid-template-columns:104px minmax(0,1fr) 54px;align-items:center;gap:8px}
+.row output{color:var(--mut);font-size:12px;text-align:right;font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--acc);margin:0}
+.tip{margin:0;color:var(--mut);font-size:12px}
+.btns{display:flex;gap:8px;flex-wrap:wrap}
+@media (max-width:900px){
+  .app{grid-template-columns:minmax(0,1fr);padding:8px}
+  .stage{--maxh:74vh}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <main class="stagewrap">
+    <div class="stage mirror" id="stage">
+      <video id="real" playsinline muted autoplay></video>
+      <div class="xr" id="xrLayer"><video id="xr" playsinline muted autoplay></video><div class="tint"></div><div class="scan"></div></div>
+      <canvas id="ov"></canvas>
+      <div class="chip" id="chip" hidden></div>
+      <button class="fs" id="fsBtn" aria-label="Fullscreen" title="Fullscreen" hidden>&#x26F6;</button>
+      <div class="gate" id="gate">
+        <div class="box">
+          <h1>X-Ray Mirror</h1>
+          <p>Allow the camera, then step back so your head and shoulders are in frame. Hold up a hand to see the bones.</p>
+          <button class="btn" id="startBtn">Start camera</button>
+          <p>Video is processed in this browser and is never uploaded.</p>
+          <p class="err" id="gateMsg" role="alert"></p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <aside class="panel">
+    <section class="card">
+      <h2>Layers</h2>
+      <div class="seg" id="presets">
+        <button type="button" data-p="skull" aria-pressed="false">Skull</button>
+        <button type="button" data-p="brain" aria-pressed="false">Brain</button>
+        <button type="button" data-p="muscles" aria-pressed="false">Muscles</button>
+        <button type="button" data-p="all" aria-pressed="false">Everything</button>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="l_skull" checked><span class="sw" style="background:#cfe6ff"></span>Skull</label>
+        <label><input type="checkbox" id="l_brain" checked><span class="sw" style="background:#ff8cc8"></span>Brain</label>
+        <label><input type="checkbox" id="l_muscles"><span class="sw" style="background:#ff5a5a"></span>Muscles</label>
+        <label><input type="checkbox" id="l_eyes" checked><span class="sw" style="background:#9fe0ff"></span>Eyes</label>
+        <label><input type="checkbox" id="l_hands" checked><span class="sw" style="background:#e8f2ff"></span>Hand bones</label>
+        <label><input type="checkbox" id="l_body" checked><span class="sw" style="background:#b7d4ff"></span>Body bones</label>
+      </div>
+      <label class="check"><input type="checkbox" id="l_labels" checked>Show labels</label>
+    </section>
+
+    <section class="card">
+      <h2>Look</h2>
+      <div class="seg" id="looks">
+        <button type="button" data-look="xray" aria-pressed="true">X-ray</button>
+        <button type="button" data-look="solid" aria-pressed="false">Solid</button>
+      </div>
+      <div class="row"><span>Brightness</span><input type="range" id="bright" min="40" max="200" value="100"><output id="o_bright">100%</output></div>
+    </section>
+
+    <section class="card">
+      <h2>Mixed reality</h2>
+      <div class="row"><span>Real me showing through</span><input type="range" id="through" min="0" max="100" value="25"><output id="o_through">25%</output></div>
+    </section>
+
+    <section class="card">
+      <h2>Fit to my head</h2>
+      <div class="row"><span>Overall size</span><input type="range" id="f_size" min="70" max="140" value="100"><output id="o_f_size">100%</output></div>
+      <div class="row"><span>Width</span><input type="range" id="f_w" min="70" max="130" value="100"><output id="o_f_w">100%</output></div>
+      <div class="row"><span>Height</span><input type="range" id="f_h" min="70" max="130" value="100"><output id="o_f_h">100%</output></div>
+      <div class="row"><span>Left / right</span><input type="range" id="f_dx" min="-30" max="30" value="0"><output id="o_f_dx">0.0 cm</output></div>
+      <div class="row"><span>Up / down</span><input type="range" id="f_dy" min="-30" max="30" value="0"><output id="o_f_dy">0.0 cm</output></div>
+      <div class="btns"><button type="button" class="ghost" id="fitReset">Reset fit</button></div>
+      <p class="tip">Tip: pick the Solid look and set "Real me showing through" to about half, then line the skull up with your face.</p>
+    </section>
+
+    <section class="card">
+      <h2>Camera</h2>
+      <div class="btns">
+        <button type="button" class="ghost" id="stopBtn" hidden>Stop camera</button>
+        <button type="button" class="ghost" id="flipBtn">Front / back camera</button>
+      </div>
+      <label class="check"><input type="checkbox" id="mirror" checked>Mirror view</label>
+      <p class="tip">The anatomy is a stylised model fitted to tracked face, hand and body points. It is for fun and learning, not a medical image.</p>
+    </section>
+  </aside>
+</div>
+
+<script>
+/* ==PURE== */
+const TAU=Math.PI*2;
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1]];
+const add=(a,b)=>[a[0]+b[0],a[1]+b[1]];
+const mul=(a,k)=>[a[0]*k,a[1]*k];
+const len=a=>Math.hypot(a[0],a[1]);
+const nrm=a=>{const l=len(a)||1;return [a[0]/l,a[1]/l];};
+const lerp=(a,b,t)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t];
+const mid=(a,b)=>lerp(a,b,.5);
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1];
+const meanPt=pts=>{let x=0,y=0;for(const p of pts){x+=p[0];y+=p[1];}return [x/pts.length,y/pts.length];};
+
+const FACE={
+  jaw:[234,93,132,58,172,136,150,149,176,148,152,377,400,378,379,365,397,288,361,323,454],
+  eyeL:[263,249,390,373,374,380,381,382,362,398,384,385,386,387,388,466],
+  eyeR:[33,7,163,144,145,153,154,155,133,173,157,158,159,160,161,246],
+  lipOut:[61,185,40,39,37,0,267,269,270,409,291,375,321,405,314,17,84,181,91,146],
+  lipUp:[78,191,80,81,82,13,312,311,310,415,308],
+  lipLo:[78,95,88,178,87,14,317,402,318,324,308],
+  zygA:[33,117,123,234], zygB:[263,346,352,454],
+  massA:[123,93,132,58,172], massB:[352,323,361,288,397]
+};
+
+function alongPoly(pts,n){
+  const cum=[0];
+  for(let i=1;i<pts.length;i++)cum.push(cum[i-1]+len(sub(pts[i],pts[i-1])));
+  const tot=cum[cum.length-1]||1, out=[];
+  for(let j=0;j<n;j++){
+    const s=tot*(j+.5)/n; let i=1;
+    while(i<cum.length-1&&cum[i]<s)i++;
+    const t=(s-cum[i-1])/((cum[i]-cum[i-1])||1);
+    out.push(lerp(pts[i-1],pts[i],Math.min(1,Math.max(0,t))));
+  }
+  return {pts:out,tot};
+}
+
+function drawScene(ctx,W,H,D,O){
+  const xray=O.look==='xray';
+  const L=O.layers;
+  const lw=Math.max(1.3,W*0.0021);
+  const A=xray?Math.min(1,0.5*O.bright+0.12):Math.max(0.05,1-O.through);
+  const pal=xray?{
+    bone:{fill:'rgba(205,230,255,0.16)',stroke:'rgba(196,228,255,0.95)',glow:'rgba(70,150,255,0.26)'},
+    hole:{fill:null,stroke:'rgba(150,200,255,0.85)',glow:null},
+    brain:{fill:'rgba(255,140,200,0.24)',stroke:'rgba(255,190,226,0.9)',glow:'rgba(255,90,170,0.18)'},
+    muscle:{fill:'rgba(255,70,70,0.20)',stroke:'rgba(255,125,110,0.85)',glow:'rgba(255,40,40,0.14)'},
+    eye:{fill:'rgba(235,248,255,0.5)',stroke:'rgba(255,255,255,0.95)',glow:'rgba(120,190,255,0.28)'},
+    tooth:{edge:'rgba(70,150,255,0.30)',face:'rgba(228,242,255,0.9)'},
+    pupil:'rgba(120,190,255,0.95)'
+  }:{
+    bone:{fill:'#e9e3d1',stroke:'#7d7459',glow:null},
+    hole:{fill:'#3a342a',stroke:'#6b6350',glow:null},
+    brain:{fill:'#dc9aa3',stroke:'#9b5360',glow:null},
+    muscle:{fill:'#a8302f',stroke:'#6e1b1c',glow:null},
+    eye:{fill:'#f6f4ee',stroke:'#5d5d58',glow:null},
+    tooth:{edge:'#7d7459',face:'#f4efdf'},
+    pupil:'#25231f'
+  };
+  const labels=[];
+  ctx.save();
+  ctx.lineJoin='round';ctx.lineCap='round';
+  ctx.globalAlpha=A;
+  ctx.globalCompositeOperation=xray?'lighter':'source-over';
+
+  function paint(kind,fill,wMul){
+    const P=pal[kind], m=wMul||1;
+    if(fill!==false&&P.fill){ctx.fillStyle=P.fill;ctx.fill();}
+    if(P.glow){ctx.lineWidth=lw*(2+1.2*m);ctx.strokeStyle=P.glow;ctx.stroke();}
+    ctx.lineWidth=lw*m;ctx.strokeStyle=P.stroke;ctx.stroke();
+  }
+  function smoothPath(pts,closed,keep){
+    const n=pts.length;
+    if(!keep)ctx.beginPath();
+    if(n<3){if(n){ctx.moveTo(pts[0][0],pts[0][1]);for(let i=1;i<n;i++)ctx.lineTo(pts[i][0],pts[i][1]);}return;}
+    if(closed){
+      const m0=mid(pts[n-1],pts[0]);ctx.moveTo(m0[0],m0[1]);
+      for(let i=0;i<n;i++){const p=pts[i],q=pts[(i+1)%n],m=mid(p,q);ctx.quadraticCurveTo(p[0],p[1],m[0],m[1]);}
+      ctx.closePath();
+    }else{
+      ctx.moveTo(pts[0][0],pts[0][1]);
+      for(let i=1;i<n-1;i++){const m=mid(pts[i],pts[i+1]);ctx.quadraticCurveTo(pts[i][0],pts[i][1],m[0],m[1]);}
+      ctx.lineTo(pts[n-1][0],pts[n-1][1]);
+    }
+  }
+  function poly(pts){ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);for(let i=1;i<pts.length;i++)ctx.lineTo(pts[i][0],pts[i][1]);ctx.closePath();}
+  function circle(c,r){ctx.beginPath();ctx.arc(c[0],c[1],Math.max(0.5,r),0,TAU);}
+  // dog-bone / muscle capsule between a and b. wd = full width at the ends.
+  function bone2(a,b,wd,o){
+    o=o||{};
+    const dv=sub(b,a),Ln=len(dv);if(Ln<2)return;
+    const n=nrm(dv),nn=[-n[1],n[0]];
+    const gA=o.gA===undefined?.05:o.gA,gB=o.gB===undefined?.05:o.gB;
+    const a2=add(a,mul(n,Ln*gA)),b2=sub(b,mul(n,Ln*gB));
+    const wh=wd/2,c=wh*(o.belly===undefined?.25:o.belly),m=mid(a2,b2),aN=Math.atan2(nn[1],nn[0]);
+    ctx.beginPath();
+    ctx.moveTo(a2[0]+nn[0]*wh,a2[1]+nn[1]*wh);
+    ctx.quadraticCurveTo(m[0]+nn[0]*c,m[1]+nn[1]*c,b2[0]+nn[0]*wh,b2[1]+nn[1]*wh);
+    ctx.arc(b2[0],b2[1],wh,aN,aN-Math.PI,true);
+    ctx.quadraticCurveTo(m[0]-nn[0]*c,m[1]-nn[1]*c,a2[0]-nn[0]*wh,a2[1]-nn[1]*wh);
+    ctx.arc(a2[0],a2[1],wh,aN+Math.PI,aN,true);
+    ctx.closePath();
+    paint(o.kind||'bone',true,o.lw||1);
+  }
+
+  /* ---------------- face / skull / brain ---------------- */
+  function drawFace(P){
+    if(P.length<468)return;
+    const g=i=>P[i];
+    const sw=len(sub(g(454),g(234))),sh=len(sub(g(152),g(10)));
+    if(!(sw>8&&sh>8))return;
+    let u=nrm(sub(g(454),g(234)));if(u[0]<0)u=[-u[0],-u[1]];
+    const d=[-u[1],u[0]];
+    const F=O.fit,k=F.size;
+    const o=add(g(168),add(mul(u,F.dx*sw/14),mul(d,F.dy*sw/14)));
+    const Lc=(a,b)=>add(o,add(mul(u,a*sw*k*F.w),mul(d,b*sh*k*F.h)));
+    const jawL2R=dot(sub(g(454),g(234)),u)>0?FACE.jaw.map(g):FACE.jaw.map(g).reverse();
+    const mc=mid(g(13),g(14));
+    const eyeC=arr=>meanPt(arr.map(g));
+    const eA=eyeC(FACE.eyeR),eB=eyeC(FACE.eyeL);
+    const eyeLeft=eA[0]<eB[0]?FACE.eyeR:FACE.eyeL, eyeRight=eA[0]<eB[0]?FACE.eyeL:FACE.eyeR;
+
+    // skull silhouette
+    const cran=[];
+    for(let i=0;i<=28;i++){const th=Math.PI+Math.PI*i/28;cran.push(Lc(0.56*Math.cos(th),0.10+0.74*Math.sin(th)));}
+    if(L.skull){
+      ctx.beginPath();ctx.moveTo(cran[0][0],cran[0][1]);
+      for(const p of cran)ctx.lineTo(p[0],p[1]);
+      for(let i=jawL2R.length-1;i>=0;i--)ctx.lineTo(jawL2R[i][0],jawL2R[i][1]);
+      ctx.closePath();paint('bone',true,1.25);
+      // coronal suture
+      const s0=Lc(-0.5,-0.14),s1=Lc(0.5,-0.14),sc=Lc(0,-0.64);
+      ctx.beginPath();ctx.moveTo(s0[0],s0[1]);ctx.quadraticCurveTo(sc[0],sc[1],s1[0],s1[1]);paint('bone',false,.6);
+      labels.push({t:'Frontal bone',p:Lc(0.14,-0.5),side:'R'});
+      labels.push({t:'Parietal bone',p:Lc(-0.34,-0.6),side:'L'});
+    }
+    // brain
+    if(L.brain){
+      const bp=[];
+      for(let i=0;i<=24;i++){const th=Math.PI+Math.PI*i/24;bp.push(Lc(0.46*Math.cos(th),-0.10+0.52*Math.sin(th)));}
+      bp.push(Lc(0.30,-0.05),Lc(0,-0.02),Lc(-0.30,-0.05));
+      smoothPath(bp,true);paint('brain',true,1);
+      ctx.save();smoothPath(bp,true);ctx.clip();
+      ctx.lineWidth=lw*.9;ctx.strokeStyle=pal.brain.stroke;ctx.globalAlpha=A*.65;
+      for(let kk=0;kk<14;kk++){
+        const phi=Math.PI+(kk+.5)/14*Math.PI;
+        ctx.beginPath();
+        for(let j=0;j<=30;j++){
+          const r=0.05+j*0.018,wob=0.16*Math.sin(j*0.55+kk*2.3)+0.07*Math.sin(j*1.3+kk);
+          const p=Lc(r*Math.cos(phi+wob)*0.9,-0.06+r*Math.sin(phi+wob)*1.0);
+          if(j)ctx.lineTo(p[0],p[1]);else ctx.moveTo(p[0],p[1]);
+        }
+        ctx.stroke();
+      }
+      const f0=Lc(0,-0.62),f1=Lc(0,-0.04);
+      ctx.beginPath();ctx.moveTo(f0[0],f0[1]);ctx.lineTo(f1[0],f1[1]);ctx.lineWidth=lw*1.4;ctx.stroke();
+      ctx.restore();
+      labels.push({t:'Cerebrum',p:Lc(-0.22,-0.3),side:'L'});
+    }
+    // face muscles
+    if(L.muscles){
+      const ring=(arr,sc,inner)=>{
+        const c=meanPt(arr.map(g));
+        const outer=arr.map(i=>lerp(c,g(i),sc));
+        smoothPath(outer,true);
+        if(inner)smoothPath(arr.map(g),true,true);
+        if(pal.muscle.fill){ctx.fillStyle=pal.muscle.fill;ctx.fill('evenodd');}
+        if(pal.muscle.glow){ctx.lineWidth=lw*3;ctx.strokeStyle=pal.muscle.glow;ctx.stroke();}
+        ctx.lineWidth=lw;ctx.strokeStyle=pal.muscle.stroke;ctx.stroke();
+      };
+      ring(FACE.lipOut,1.5,true);
+      ring(FACE.eyeR,2.1,true);ring(FACE.eyeL,2.1,true);
+      for(const arr of [FACE.massA,FACE.massB]){
+        const q=arr.map(g);q.push(mid(q[4],g(arr===FACE.massA?207:427)),mid(q[0],g(arr===FACE.massA?207:427)));
+        smoothPath(q,true);paint('muscle',true,1);
+      }
+      ctx.lineWidth=lw*2;ctx.strokeStyle=pal.muscle.stroke;
+      for(let i=0;i<7;i++){const a=-0.3+i*0.1;const p0=Lc(a,-0.14),p1=Lc(a*1.05,-0.36);ctx.beginPath();ctx.moveTo(p0[0],p0[1]);ctx.lineTo(p1[0],p1[1]);ctx.stroke();}
+      labels.push({t:'Orbicularis oris',p:g(61),side:'L'});
+      labels.push({t:'Masseter',p:mid(g(58),g(123)),side:'R'});
+    }
+    if(L.skull){
+      // orbits
+      for(const arr of [FACE.eyeR,FACE.eyeL]){
+        const c=eyeC(arr);
+        smoothPath(arr.map(i=>lerp(c,g(i),1.85)),true);paint('hole',true,1.5);
+      }
+      // nasal bones + aperture
+      const t0=g(168),t1=g(195),nw=sw*0.045;
+      poly([sub(t0,mul(u,nw*.6)),add(t0,mul(u,nw*.6)),add(t1,mul(u,nw*1.5)),sub(t1,mul(u,nw*1.5))]);paint('bone',true,1);
+      const apex=lerp(g(195),g(5),0.3);
+      smoothPath([apex,g(358),g(327),g(2),g(98),g(129)],true);paint('hole',true,1);
+      labels.push({t:'Nasal bone',p:mid(t0,t1),side:'R'});
+      // cheekbones
+      for(const arr of [FACE.zygA,FACE.zygB]){smoothPath(arr.map(g),false);paint('bone',false,2.3);}
+      const zr=g(FACE.zygA[2])[0]>g(FACE.zygB[2])[0]?g(FACE.zygA[2]):g(FACE.zygB[2]);
+      labels.push({t:'Zygomatic bone',p:zr,side:'R'});
+      // maxilla (alveolar ridge)
+      const up=FACE.lipUp.map(i=>sub(g(i),mul(d,sh*0.04)));
+      smoothPath(up,false);paint('bone',false,3);
+      labels.push({t:'Maxilla (upper jaw)',p:up[1],side:'L'});
+      // mandible
+      const inner=jawL2R.map(p=>lerp(p,mc,0.17));
+      ctx.beginPath();ctx.moveTo(jawL2R[0][0],jawL2R[0][1]);
+      for(const p of jawL2R)ctx.lineTo(p[0],p[1]);
+      for(let i=inner.length-1;i>=0;i--)ctx.lineTo(inner[i][0],inner[i][1]);
+      ctx.closePath();paint('bone',true,1.2);
+      const mi=jawL2R[Math.floor(jawL2R.length*0.8)];
+      labels.push({t:'Mandible (lower jaw)',p:mi,side:'R'});
+      // teeth
+      const nT=12,up2=alongPoly(FACE.lipUp.map(g),nT),lo2=alongPoly(FACE.lipLo.map(g),nT);
+      const tw=up2.tot/nT*0.8,tl=sh*0.05;
+      const teeth=(arr,dir)=>{
+        for(const pass of [0,1]){
+          ctx.lineWidth=pass?tw:tw+lw*(xray?3:1.8);
+          ctx.strokeStyle=pass?pal.tooth.face:pal.tooth.edge;
+          for(const p of arr){ctx.beginPath();ctx.moveTo(p[0],p[1]);ctx.lineTo(p[0]+d[0]*tl*dir,p[1]+d[1]*tl*dir);ctx.stroke();}
+        }
+      };
+      teeth(up2.pts,1);teeth(lo2.pts,-1);
+      labels.push({t:'Teeth',p:up2.pts[nT-3],side:'R'});
+    }
+    // eyeballs
+    if(L.eyes){
+      const pairs=[[FACE.eyeR,468],[FACE.eyeL,473]];
+      for(const [arr,ic] of pairs){
+        const c=eyeC(arr),w=len(sub(g(arr[0]),g(arr[8]))),r=w*0.55;
+        circle(c,r);paint('eye',true,1);
+        const ip=P[ic]||c;
+        circle(ip,r*0.5);paint('eye',false,1);
+        circle(ip,r*0.2);ctx.fillStyle=pal.pupil;ctx.fill();
+      }
+      labels.push({t:'Eyeball',p:eyeC(eyeLeft),side:'L'});
+    }
+  }
+
+  /* ---------------- hand ---------------- */
+  function drawHand(P,first){
+    if(P.length<21)return;
+    const palm=len(sub(P[9],P[0]));if(palm<6)return;
+    const w=palm*0.20,wr=P[0];
+    const dir=nrm(sub(P[9],P[0])),across=sub(P[5],P[17]),aw=len(across)||1,ac=nrm(across);
+    // forearm
+    const far=sub(wr,mul(dir,palm*1.05));
+    for(const s of [-1,1]){
+      const off=mul(ac,s*aw*0.2);
+      bone2(add(far,off),add(wr,add(off,mul(dir,palm*0.04))),w*(s>0?0.95:0.8),{gA:0,gB:0.02,belly:.35});
+    }
+    // carpals
+    for(let r=0;r<2;r++)for(let c=0;c<4;c++){
+      const p=add(wr,add(mul(dir,palm*(0.10+r*0.10)),mul(ac,aw*(-0.27+c*0.18+(r?0.04:0)))));
+      circle(p,w*0.42);paint('bone',true,.9);
+    }
+    bone2(lerp(P[0],P[1],0.25),P[1],w*0.85,{gA:0,gB:0.05});
+    bone2(P[1],P[2],w*0.95);
+    bone2(P[2],P[3],w*0.9);
+    bone2(P[3],P[4],w*0.7,{gB:0.16});
+    for(const m of [5,9,13,17]){
+      bone2(lerp(P[0],P[m],0.2),P[m],w*0.95,{gA:0,gB:0.06});
+      bone2(P[m],P[m+1],w*0.9);
+      bone2(P[m+1],P[m+2],w*0.75);
+      bone2(P[m+2],P[m+3],w*0.62,{gB:0.16});
+    }
+    if(first){
+      const side=p=>p[0]<W/2?'L':'R';
+      const a1=mid(P[7],P[8]),a2=mid(P[10],P[11]),a3=mid(P[13],P[14]),a4=lerp(P[0],P[13],0.55),a5=add(wr,mul(dir,palm*0.13));
+      labels.push({t:'Distal phalanx',p:a1,side:side(a1)});
+      labels.push({t:'Middle phalanx',p:a2,side:side(a2)});
+      labels.push({t:'Proximal phalanx',p:a3,side:side(a3)});
+      labels.push({t:'Metacarpals',p:a4,side:side(a4)});
+      labels.push({t:'Carpals',p:a5,side:side(a5)});
+      const a6=add(wr,mul(dir,-palm*0.6));labels.push({t:'Radius / ulna',p:a6,side:side(a6)});
+    }
+  }
+
+  /* ---------------- body ---------------- */
+  function drawBody(P){
+    if(P.length<33)return;
+    const V=i=>P[i]&&P[i][2]>0.5;
+    if(!(V(11)&&V(12)))return;
+    const sA=P[11][0]<P[12][0]?P[11]:P[12],sB=P[11][0]<P[12][0]?P[12]:P[11];
+    const S=mid(sA,sB),sw=len(sub(sB,sA));if(sw<20)return;
+    const u=nrm(sub(sB,sA)),dn=[-u[1],u[0]];
+    const hips=V(23)&&V(24);
+    const Hc=hips?mid(P[23],P[24]):add(S,mul(dn,sw*1.5));
+    const td=nrm(sub(Hc,S)),TL=len(sub(Hc,S));
+    const at=(t,x)=>add(S,add(mul(td,TL*t),mul(u,x||0)));
+    const sideOf=p=>p[0]<W/2?'L':'R';
+
+    if(L.muscles){
+      const Nk=sub(S,mul(td,sw*0.55));
+      smoothPath([Nk,sub(sA,mul(td,sw*0.04)),add(lerp(sA,S,0.35),mul(td,sw*0.18)),add(S,mul(td,sw*0.12)),add(lerp(sB,S,0.35),mul(td,sw*0.18)),sub(sB,mul(td,sw*0.04))],true);
+      paint('muscle',true,1);
+      for(const sg of [-1,1]){
+        const sp=sg<0?sA:sB;
+        smoothPath([add(S,mul(td,sw*0.12)),add(lerp(sp,S,0.18),mul(td,sw*0.06)),add(sp,add(mul(td,sw*0.45),mul(u,-sg*sw*0.10))),add(S,add(mul(td,sw*0.72),mul(u,sg*sw*0.04)))],true);
+        paint('muscle',true,1);
+      }
+      for(const [s,e,w2] of [[11,13],[12,14]]){
+        if(V(s)&&V(e))bone2(P[s],P[e],sw*0.2,{kind:'muscle',belly:1.5,gA:0,gB:0});
+      }
+      for(const [s,e] of [[13,15],[14,16]]){
+        if(V(s)&&V(e))bone2(P[s],P[e],sw*0.14,{kind:'muscle',belly:1.5,gA:0,gB:0});
+      }
+      labels.push({t:'Trapezius',p:add(lerp(sA,S,0.4),mul(td,sw*0.06)),side:'L'});
+      labels.push({t:'Pectoralis major',p:add(S,add(mul(td,sw*0.4),mul(u,sw*0.2))),side:'R'});
+    }
+
+    if(L.body){
+      // spine (neck to pelvis)
+      const top=(V(7)&&V(8))?mid(P[7],P[8]):sub(S,mul(td,sw*0.75));
+      const nV=26;
+      for(let i=0;i<nV;i++){
+        const t0=i/nV,t1=(i+1)/nV;
+        const a=lerp(top,Hc,t0),b=lerp(top,Hc,t1);
+        bone2(a,b,sw*(i<7?0.05:0.075),{gA:.12,gB:.12,belly:.1,lw:.8});
+      }
+      // ribcage
+      ctx.lineWidth=lw*2.4;
+      for(let i=0;i<10;i++){
+        const f=i/9,t=0.10+0.48*f;
+        const sp=at(t,0);
+        const hw=sw*(0.36+0.17*Math.sin(Math.PI*Math.min(1,0.25+f*0.8)))*(1-0.25*Math.max(0,f-0.6));
+        for(const sg of [-1,1]){
+          const ctrl=add(sp,add(mul(u,sg*hw*1.2),mul(td,TL*0.012)));
+          const end=add(sp,mul(td,TL*0.075));
+          ctx.beginPath();ctx.moveTo(sp[0],sp[1]);ctx.quadraticCurveTo(ctrl[0],ctrl[1],end[0],end[1]);
+          if(pal.bone.glow){ctx.lineWidth=lw*5;ctx.strokeStyle=pal.bone.glow;ctx.stroke();}
+          ctx.lineWidth=lw*2.2;ctx.strokeStyle=pal.bone.stroke;ctx.stroke();
+        }
+      }
+      // sternum + clavicles
+      const st0=at(0.05,0),st1=at(0.36,0);
+      bone2(st0,st1,sw*0.09,{gA:0,gB:0,belly:.5});
+      for(const sp of [sA,sB]){
+        const e=lerp(sp,S,0.08);
+        bone2(add(st0,mul(dn,-sw*0.0)),e,sw*0.06,{gA:.02,gB:.02,belly:.4});
+        circle(sp,sw*0.055);paint('bone',true,1);
+      }
+      // arms
+      for(const [s,e,wst] of [[11,13],[12,14]])if(V(s)&&V(e))bone2(P[s],P[e],sw*0.1);
+      for(const [e,wr] of [[13,15],[14,16]])if(V(e)&&V(wr)){
+        const dv=sub(P[wr],P[e]),nn=nrm([-dv[1],dv[0]]),off=mul(nn,sw*0.03);
+        bone2(add(P[e],off),add(P[wr],off),sw*0.055,{belly:.3});
+        bone2(sub(P[e],off),sub(P[wr],off),sw*0.045,{belly:.3});
+      }
+      // legs
+      for(const [h,k,a,f] of [[23,25,27,31],[24,26,28,32]]){
+        if(V(h)&&V(k))bone2(P[h],P[k],sw*0.13);
+        if(V(k)&&V(a)){
+          const dv=sub(P[a],P[k]),nn=nrm([-dv[1],dv[0]]),off=mul(nn,sw*0.03);
+          bone2(add(P[k],off),add(P[a],off),sw*0.075);
+          bone2(sub(P[k],off),sub(P[a],off),sw*0.04);
+        }
+        if(V(a)&&V(f))bone2(P[a],P[f],sw*0.05);
+      }
+      // pelvis
+      if(hips){
+        const hw=len(sub(P[24],P[23])),pu=nrm(sub(P[24],P[23]));
+        const pa=(x,y)=>add(Hc,add(mul(pu,hw*x),mul(td,hw*y)));
+        smoothPath([pa(-0.78,-0.28),pa(-0.15,-0.36),pa(0.15,-0.36),pa(0.78,-0.28),pa(0.64,0.18),pa(0.12,0.46),pa(-0.12,0.46),pa(-0.64,0.18)],true);
+        paint('bone',true,1.2);
+        ctx.beginPath();ctx.ellipse(Hc[0]+td[0]*hw*0.1,Hc[1]+td[1]*hw*0.1,hw*0.26,hw*0.17,Math.atan2(pu[1],pu[0]),0,TAU);paint('hole',true,1);
+        const pl=pa(-0.7,0.1);labels.push({t:'Pelvis',p:pl,side:sideOf(pl)});
+      }
+      const c1=lerp(st0,sA,0.55),c2=at(0.2,sw*0.28),c3=at(0.30,0),c4=lerp(P[11],P[13],0.5),c5=lerp(P[12],P[14],0.5);
+      labels.push({t:'Clavicle',p:c1,side:'L'});
+      labels.push({t:'Ribs',p:c2,side:'R'});
+      labels.push({t:'Sternum',p:c3,side:'R'});
+      labels.push({t:'Spine',p:at(0.5,0),side:'L'});
+      if(V(11)&&V(13))labels.push({t:'Humerus',p:c4,side:sideOf(c4)});
+      if(V(12)&&V(14)&&!(V(11)&&V(13)))labels.push({t:'Humerus',p:c5,side:sideOf(c5)});
+      if(V(23)&&V(25)){const f=lerp(P[23],P[25],0.5);labels.push({t:'Femur',p:f,side:sideOf(f)});}
+    }
+  }
+
+  /* ---------------- run ---------------- */
+  if(D.pose&&(L.body||L.muscles))drawBody(D.pose);
+  if(D.face&&(L.skull||L.brain||L.eyes||L.muscles))drawFace(D.face);
+  if(D.hands&&L.hands)D.hands.forEach((h,i)=>drawHand(h,i===0));
+  ctx.restore();
+
+  /* ---------------- labels ---------------- */
+  if(L.labels&&labels.length){
+    ctx.save();
+    const fs=Math.max(11,W*0.0165),pad=W*0.02;
+    ctx.font=fs+'px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+    ctx.textBaseline='middle';ctx.lineJoin='round';
+    for(const side of ['L','R']){
+      const arr=labels.filter(l=>l.side===side&&isFinite(l.p[0])&&isFinite(l.p[1])&&l.p[0]>=0&&l.p[0]<=W&&l.p[1]>=0&&l.p[1]<=H)
+        .sort((a,b)=>a.p[1]-b.p[1]);
+      let y=-1e9;
+      for(const l of arr){l.y=Math.max(l.p[1],y+fs*1.5);y=l.y;}
+      let yMax=H-fs;
+      for(let i=arr.length-1;i>=0;i--){arr[i].y=Math.min(arr[i].y,yMax);yMax=arr[i].y-fs*1.5;}
+      for(const l of arr){
+        const tw=ctx.measureText(l.t).width;
+        const tx=side==='L'?pad:W-pad-tw;
+        const ex=side==='L'?pad+tw+6:W-pad-tw-6;
+        ctx.beginPath();ctx.moveTo(l.p[0],l.p[1]);ctx.lineTo(ex,l.y);
+        ctx.lineWidth=Math.max(1,lw*.6);ctx.strokeStyle='rgba(170,215,255,0.75)';ctx.stroke();
+        ctx.beginPath();ctx.arc(l.p[0],l.p[1],Math.max(2,lw*1.2),0,TAU);ctx.fillStyle='#bfe3ff';ctx.fill();
+        ctx.lineWidth=3;ctx.strokeStyle='rgba(0,0,0,0.7)';ctx.strokeText(l.t,tx,l.y);
+        ctx.fillStyle='#eaf5ff';ctx.fillText(l.t,tx,l.y);
+      }
+    }
+    ctx.restore();
+  }
+}
+/* ==END PURE== */
+</script>
+
+<script>
+(function(){
+'use strict';
+const $=id=>document.getElementById(id);
+const stage=$('stage'),real=$('real'),xr=$('xr'),xrLayer=$('xrLayer'),ov=$('ov'),chip=$('chip');
+const gate=$('gate'),gateMsg=$('gateMsg'),startBtn=$('startBtn');
+const ctx=ov.getContext('2d');
+
+const S={layers:{skull:true,brain:true,muscles:false,eyes:true,hands:true,body:true,labels:true},
+  look:'xray',bright:1,through:.25,fit:{size:1,w:1,h:1,dx:0,dy:0},mirror:true,facing:'user'};
+
+/* ---------- UI wiring ---------- */
+function setChip(text,warn){
+  if(!text){chip.hidden=true;return;}
+  chip.hidden=false;chip.textContent=text;chip.classList.toggle('warn',!!warn);
+}
+function applyLook(){
+  const xray=S.look==='xray';
+  xrLayer.style.display=xray?'block':'none';
+  xrLayer.style.opacity=String(1-S.through);
+  xr.style.filter='grayscale(1) invert(1) contrast(1.5) brightness('+(0.55*S.bright+0.25).toFixed(2)+')';
+  ov.style.filter=xray?'':'brightness('+S.bright.toFixed(2)+')';
+  for(const b of document.querySelectorAll('#looks button'))b.setAttribute('aria-pressed',String(b.dataset.look===S.look));
+}
+function bindRange(id,fn,fmt){
+  const el=$(id),out=$('o_'+id);
+  const upd=()=>{fn(+el.value);out.textContent=fmt(+el.value);};
+  el.addEventListener('input',upd);upd();
+  return {set(v){el.value=v;upd();}};
+}
+bindRange('bright',v=>{S.bright=v/100;applyLook();},v=>v+'%');
+bindRange('through',v=>{S.through=v/100;applyLook();},v=>v+'%');
+const fitCtl=[
+  bindRange('f_size',v=>S.fit.size=v/100,v=>v+'%'),
+  bindRange('f_w',v=>S.fit.w=v/100,v=>v+'%'),
+  bindRange('f_h',v=>S.fit.h=v/100,v=>v+'%'),
+  bindRange('f_dx',v=>S.fit.dx=v/10,v=>(v/10).toFixed(1)+' cm'),
+  bindRange('f_dy',v=>S.fit.dy=v/10,v=>(v/10).toFixed(1)+' cm')
+];
+$('fitReset').addEventListener('click',()=>{[100,100,100,0,0].forEach((v,i)=>fitCtl[i].set(v));});
+for(const k of Object.keys(S.layers)){
+  $('l_'+k).addEventListener('change',e=>{S.layers[k]=e.target.checked;syncPresets();ensureModels();});
+}
+const PRE={
+  skull:{skull:1,brain:0,muscles:0,eyes:1,hands:1,body:1},
+  brain:{skull:0,brain:1,muscles:0,eyes:1,hands:0,body:0},
+  muscles:{skull:0,brain:0,muscles:1,eyes:0,hands:0,body:1},
+  all:{skull:1,brain:1,muscles:1,eyes:1,hands:1,body:1}
+};
+function syncPresets(){
+  for(const b of document.querySelectorAll('#presets button')){
+    const p=PRE[b.dataset.p];
+    b.setAttribute('aria-pressed',String(Object.keys(p).every(k=>!!p[k]===S.layers[k])));
+  }
+}
+for(const b of document.querySelectorAll('#presets button')){
+  b.addEventListener('click',()=>{
+    const p=PRE[b.dataset.p];
+    for(const k of Object.keys(p)){S.layers[k]=!!p[k];$('l_'+k).checked=!!p[k];}
+    syncPresets();ensureModels();
+  });
+}
+syncPresets();
+for(const b of document.querySelectorAll('#looks button')){
+  b.addEventListener('click',()=>{S.look=b.dataset.look;applyLook();});
+}
+function setMirror(m){S.mirror=m;$('mirror').checked=m;stage.classList.toggle('mirror',m);sm.face=null;sm.hands=[];sm.pose=null;}
+$('mirror').addEventListener('change',e=>setMirror(e.target.checked));
+$('fsBtn').addEventListener('click',()=>{
+  try{(document.fullscreenElement?document.exitFullscreen():stage.requestFullscreen()).catch(()=>{});}catch(e){}
+});
+applyLook();
+
+/* ---------- camera ---------- */
+let stream=null,vw=0,vh=0;
+function camError(e){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)
+    return 'The camera needs a secure page. Open this file in Chrome or Edge, or host it on https.';
+  switch(e&&e.name){
+    case 'NotAllowedError':case 'SecurityError':return 'Camera access was blocked. Allow the camera in the browser site settings, then press Start again.';
+    case 'NotFoundError':case 'OverconstrainedError':return 'No camera was found on this device.';
+    case 'NotReadableError':return 'The camera is in use by another app. Close it and try again.';
+    default:return 'Could not start the camera ('+((e&&e.name)||'unknown error')+').';
+  }
+}
+async function startCam(){
+  stopCam(true);
+  gateMsg.textContent='';
+  let s;
+  try{
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('no-mediadevices');
+    s=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:S.facing,width:{ideal:1280},height:{ideal:720}}});
+  }catch(e){gate.hidden=false;gateMsg.textContent=camError(e);return;}
+  stream=s;
+  real.srcObject=s;xr.srcObject=s;
+  await new Promise(res=>{if(real.readyState>=1)res();else real.addEventListener('loadedmetadata',res,{once:true});});
+  try{await Promise.all([real.play(),xr.play()]);}catch(e){}
+  vw=real.videoWidth||1280;vh=real.videoHeight||720;
+  ov.width=vw;ov.height=vh;
+  stage.style.setProperty('--ar',(vw/vh).toFixed(4));
+  setMirror(S.facing==='user');
+  gate.hidden=true;$('stopBtn').hidden=false;$('fsBtn').hidden=false;
+  setChip('Camera on. Loading tracking models…');
+  ensureModels();
+  if(!raf)raf=requestAnimationFrame(loop);
+}
+function stopCam(keepGate){
+  if(stream){for(const t of stream.getTracks())t.stop();stream=null;}
+  real.srcObject=null;xr.srcObject=null;
+  if(raf){cancelAnimationFrame(raf);raf=0;}
+  if(ctx&&ov.width)ctx.clearRect(0,0,ov.width,ov.height);
+  if(!keepGate){gate.hidden=false;$('stopBtn').hidden=true;$('fsBtn').hidden=true;setChip('');}
+  sm.face=null;sm.hands=[];sm.pose=null;
+}
+startBtn.addEventListener('click',startCam);
+$('stopBtn').addEventListener('click',()=>stopCam(false));
+$('flipBtn').addEventListener('click',()=>{S.facing=S.facing==='user'?'environment':'user';if(stream)startCam();});
+
+/* ---------- tracking models (MediaPipe Tasks Vision) ---------- */
+const CDN='https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const URLS={
+  face:'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+  hand:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+  pose:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task'
+};
+let mp=null,vision=null,failed=false;
+const models={face:null,hand:null,pose:null},loading={face:false,hand:false,pose:false};
+const sm={face:null,hands:[],pose:null},miss={face:0,hand:0,pose:0};
+let raf=0,lastT=-1,lastTs=0;
+
+const need=()=>({
+  face:S.layers.skull||S.layers.brain||S.layers.eyes||S.layers.muscles,
+  hand:S.layers.hands,
+  pose:S.layers.body||S.layers.muscles
+});
+async function getVision(){
+  if(vision)return vision;
+  mp=await import(CDN+'/vision_bundle.mjs');
+  vision=await mp.FilesetResolver.forVisionTasks(CDN+'/wasm');
+  return vision;
+}
+async function build(kind){
+  const v=await getVision();
+  const mk=del=>{
+    const base={modelAssetPath:URLS[kind],delegate:del};
+    if(kind==='face')return mp.FaceLandmarker.createFromOptions(v,{baseOptions:base,runningMode:'VIDEO',numFaces:1});
+    if(kind==='hand')return mp.HandLandmarker.createFromOptions(v,{baseOptions:base,runningMode:'VIDEO',numHands:2});
+    return mp.PoseLandmarker.createFromOptions(v,{baseOptions:base,runningMode:'VIDEO',numPoses:1});
+  };
+  try{return await mk('GPU');}catch(e){return await mk('CPU');}
+}
+async function ensureModels(){
+  if(!stream||failed)return;
+  const n=need();
+  for(const kind of ['face','hand','pose']){
+    if(!n[kind]||models[kind]||loading[kind])continue;
+    loading[kind]=true;
+    setChip('Loading '+(kind==='hand'?'hand':kind==='pose'?'body':'face')+' tracking…');
+    try{
+      models[kind]=await build(kind);
+    }catch(e){
+      failed=true;
+      setChip('Tracking could not load (internet is needed the first time). The X-ray filter still works.',true);
+      loading[kind]=false;return;
+    }
+    loading[kind]=false;
+  }
+  if(!failed)setChip(Object.values(loading).some(Boolean)?'Loading tracking…':'Tracking ready. Step back so your head and shoulders show.');
+  setTimeout(()=>{if(!failed&&!Object.values(loading).some(Boolean))setChip('');},4000);
+}
+function mapSmooth(prev,lms,vis,a){
+  const W=ov.width,H=ov.height,n=lms.length,out=new Array(n);
+  for(let i=0;i<n;i++){
+    const p=lms[i],x=(S.mirror?1-p.x:p.x)*W,y=p.y*H;
+    const z=vis?(p.visibility===undefined?1:p.visibility):(p.z||0);
+    if(prev&&prev.length===n)out[i]=[prev[i][0]+(x-prev[i][0])*a,prev[i][1]+(y-prev[i][1])*a,z];
+    else out[i]=[x,y,z];
+  }
+  return out;
+}
+function detect(){
+  const n=need();
+  const ts=Math.max(lastTs+1,Math.round(performance.now()));lastTs=ts;
+  try{
+    if(models.face&&n.face){
+      const r=models.face.detectForVideo(real,ts),l=r.faceLandmarks&&r.faceLandmarks[0];
+      if(l){sm.face=mapSmooth(sm.face,l,false,.6);miss.face=0;}else if(++miss.face>5)sm.face=null;
+    }
+    if(models.hand&&n.hand){
+      const r=models.hand.detectForVideo(real,ts),ls=r.landmarks||[];
+      if(ls.length){sm.hands=ls.map((l,i)=>mapSmooth(sm.hands[i],l,false,.6));miss.hand=0;}
+      else if(++miss.hand>5)sm.hands=[];
+    }
+    if(models.pose&&n.pose){
+      const r=models.pose.detectForVideo(real,ts),l=r.landmarks&&r.landmarks[0];
+      if(l){sm.pose=mapSmooth(sm.pose,l,true,.5);miss.pose=0;}else if(++miss.pose>5)sm.pose=null;
+    }
+  }catch(e){/* skip a bad frame */}
+}
+function loop(){
+  raf=requestAnimationFrame(loop);
+  if(!stream||real.readyState<2)return;
+  if(real.currentTime!==lastT){lastT=real.currentTime;detect();}
+  const W=ov.width,H=ov.height;
+  ctx.clearRect(0,0,W,H);
+  drawScene(ctx,W,H,{face:sm.face,hands:sm.hands,pose:sm.pose},
+    {look:S.look,bright:S.bright,through:S.through,layers:S.layers,fit:S.fit});
+}
+})();
+</script>
+</body>
+</html>
