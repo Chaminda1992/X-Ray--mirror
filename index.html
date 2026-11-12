@@ -16,7 +16,10 @@ html,body{margin:0;background:var(--bg);color:var(--fg);
   font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 button{font:inherit;color:inherit}
 .app{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:12px;padding:12px;min-height:100vh;align-items:start}
-.stagewrap{min-width:0;display:flex;justify-content:center}
+.stagewrap{min-width:0;display:flex;flex-direction:column;align-items:center;gap:10px}
+.banner{margin:0;width:100%;padding:10px 12px;border-radius:10px;background:#16202f;border:1px solid var(--acc);color:var(--fg);font-size:13px;line-height:1.4}
+.banner.warn{background:#2a1a08;border-color:var(--warn);color:var(--warn)}
+.stage.idle{aspect-ratio:auto;width:100%;height:min(78vh,560px)}
 .stage{
   --ar:1.7778; --maxh:calc(100vh - 24px);
   position:relative;background:#000;border-radius:14px;overflow:hidden;
@@ -36,7 +39,7 @@ button{font:inherit;color:inherit}
 .chip.warn{color:var(--warn)}
 .fs{position:absolute;right:10px;top:10px;width:38px;height:38px;border-radius:10px;border:1px solid var(--line);
   background:rgba(6,10,17,.78);cursor:pointer;font-size:18px;line-height:1}
-.gate{position:absolute;inset:0;display:grid;place-items:center;padding:20px;
+.gate{position:absolute;inset:0;display:grid;place-items:center;padding:20px;overflow:auto;
   background:radial-gradient(circle at 50% 40%,#0f2038 0,#060a11 70%)}
 .gate .box{max-width:420px;text-align:center;display:grid;gap:14px;justify-items:center}
 .gate h1{margin:0;font-size:26px;letter-spacing:.02em;font-weight:650}
@@ -71,7 +74,8 @@ input[type=range]{width:100%;accent-color:var(--acc);margin:0}
 <body>
 <div class="app">
   <main class="stagewrap">
-    <div class="stage mirror" id="stage">
+    <p class="banner" id="banner" role="alert" hidden></p>
+    <div class="stage mirror idle" id="stage">
       <video id="real" playsinline muted autoplay></video>
       <div class="xr" id="xrLayer"><video id="xr" playsinline muted autoplay></video><div class="tint"></div><div class="scan"></div></div>
       <canvas id="ov"></canvas>
@@ -724,6 +728,12 @@ const $=id=>document.getElementById(id);
 const stage=$('stage'),real=$('real'),xr=$('xr'),xrLayer=$('xrLayer'),ov=$('ov'),chip=$('chip');
 const gate=$('gate'),gateMsg=$('gateMsg'),startBtn=$('startBtn');
 const ctx=ov.getContext('2d');
+const banner=$('banner');
+function showBanner(msg,warn){
+  banner.textContent=msg||'';banner.hidden=!msg;banner.classList.toggle('warn',!!warn);
+}
+window.addEventListener('error',e=>showBanner('Something went wrong in the page: '+(e.message||'unknown error'),true));
+window.addEventListener('unhandledrejection',e=>showBanner('Something went wrong: '+((e.reason&&e.reason.message)||e.reason||'unknown error'),true));
 
 const S={layers:{skull:true,brain:true,muscles:false,eyes:true,hands:true,body:true,organs:false,labels:true},
   look:'xray',bright:1,through:.25,fit:{size:1,w:1,h:1,dx:0,dy:0},mirror:true,facing:'user',
@@ -799,8 +809,13 @@ applyLook();
 /* ---------- camera ---------- */
 let stream=null,vw=0,vh=0;
 function camError(e){
-  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)
-    return 'The camera needs a secure page. Open this file in Chrome or Edge, or host it on https.';
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    if(/FBAN|FBAV|Instagram|WhatsApp|Line\/|Messenger|Telegram/i.test(navigator.userAgent))
+      return 'This app’s built-in browser blocks the camera. Open the link in Chrome instead (menu, then Open in Chrome).';
+    if(location.protocol==='file:'||location.protocol==='content:')
+      return 'The camera cannot start when the page is opened as a file ('+location.protocol+'). Open the https link from GitHub Pages in Chrome instead.';
+    return 'The camera needs a secure https page. This page is on '+location.protocol+'//'+location.host+'. Open the GitHub Pages https link in Chrome.';
+  }
   switch(e&&e.name){
     case 'NotAllowedError':case 'SecurityError':return 'Camera access was blocked. Allow the camera in the browser site settings, then press Start again.';
     case 'NotFoundError':case 'OverconstrainedError':return 'No camera was found on this device.';
@@ -811,11 +826,12 @@ function camError(e){
 async function startCam(){
   stopCam(true);
   gateMsg.textContent='';
+  showBanner('Asking the browser for the camera. Tap Allow when it asks.');
   let s;
   try{
     if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('no-mediadevices');
     s=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:S.facing,width:{ideal:1280},height:{ideal:720}}});
-  }catch(e){gate.hidden=false;gateMsg.textContent=camError(e);return;}
+  }catch(e){const m=camError(e);gate.hidden=false;gateMsg.textContent=m;showBanner(m,true);return;}
   stream=s;
   real.srcObject=s;xr.srcObject=s;
   await new Promise(res=>{if(real.readyState>=1)res();else real.addEventListener('loadedmetadata',res,{once:true});});
@@ -824,7 +840,8 @@ async function startCam(){
   ov.width=vw;ov.height=vh;
   stage.style.setProperty('--ar',(vw/vh).toFixed(4));
   setMirror(S.facing==='user');
-  gate.hidden=true;$('stopBtn').hidden=false;$('fsBtn').hidden=false;$('shotBtn').hidden=false;
+  gate.hidden=true;stage.classList.remove('idle');showBanner('');
+  $('stopBtn').hidden=false;$('fsBtn').hidden=false;$('shotBtn').hidden=false;
   setChip('Camera on. Loading tracking models…');
   ensureModels();
   if(!raf)raf=requestAnimationFrame(loop);
@@ -834,10 +851,10 @@ function stopCam(keepGate){
   real.srcObject=null;xr.srcObject=null;
   if(raf){cancelAnimationFrame(raf);raf=0;}
   if(ctx&&ov.width)ctx.clearRect(0,0,ov.width,ov.height);
-  if(!keepGate){gate.hidden=false;$('stopBtn').hidden=true;$('fsBtn').hidden=true;$('shotBtn').hidden=true;setChip('');}
+  if(!keepGate){gate.hidden=false;stage.classList.add('idle');$('stopBtn').hidden=true;$('fsBtn').hidden=true;$('shotBtn').hidden=true;setChip('');}
   sm.face=null;sm.hands=[];sm.pose=null;
 }
-startBtn.addEventListener('click',startCam);
+startBtn.addEventListener('click',()=>{startCam().catch(e=>{const m='Could not start the camera: '+((e&&e.message)||e);gate.hidden=false;gateMsg.textContent=m;showBanner(m,true);});});
 $('stopBtn').addEventListener('click',()=>stopCam(false));
 $('flipBtn').addEventListener('click',()=>{S.facing=S.facing==='user'?'environment':'user';if(stream)startCam();});
 
