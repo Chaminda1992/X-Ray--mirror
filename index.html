@@ -34,7 +34,7 @@ button{font:inherit;color:inherit}
 .chip{position:absolute;left:10px;bottom:10px;max-width:calc(100% - 70px);padding:6px 10px;border-radius:999px;
   background:rgba(6,10,17,.78);border:1px solid var(--line);font-size:12px;color:var(--fg)}
 .chip.warn{color:var(--warn)}
-.fs{position:absolute;right:10px;bottom:10px;width:38px;height:38px;border-radius:10px;border:1px solid var(--line);
+.fs{position:absolute;right:10px;top:10px;width:38px;height:38px;border-radius:10px;border:1px solid var(--line);
   background:rgba(6,10,17,.78);cursor:pointer;font-size:18px;line-height:1}
 .gate{position:absolute;inset:0;display:grid;place-items:center;padding:20px;
   background:radial-gradient(circle at 50% 40%,#0f2038 0,#060a11 70%)}
@@ -96,6 +96,7 @@ input[type=range]{width:100%;accent-color:var(--acc);margin:0}
         <button type="button" data-p="skull" aria-pressed="false">Skull</button>
         <button type="button" data-p="brain" aria-pressed="false">Brain</button>
         <button type="button" data-p="muscles" aria-pressed="false">Muscles</button>
+        <button type="button" data-p="organs" aria-pressed="false">Organs</button>
         <button type="button" data-p="all" aria-pressed="false">Everything</button>
       </div>
       <div class="checks">
@@ -105,6 +106,7 @@ input[type=range]{width:100%;accent-color:var(--acc);margin:0}
         <label><input type="checkbox" id="l_eyes" checked><span class="sw" style="background:#9fe0ff"></span>Eyes</label>
         <label><input type="checkbox" id="l_hands" checked><span class="sw" style="background:#e8f2ff"></span>Hand bones</label>
         <label><input type="checkbox" id="l_body" checked><span class="sw" style="background:#b7d4ff"></span>Body bones</label>
+        <label><input type="checkbox" id="l_organs"><span class="sw" style="background:#ff6f8f"></span>Organs</label>
       </div>
       <label class="check"><input type="checkbox" id="l_labels" checked>Show labels</label>
     </section>
@@ -114,7 +116,10 @@ input[type=range]{width:100%;accent-color:var(--acc);margin:0}
       <div class="seg" id="looks">
         <button type="button" data-look="xray" aria-pressed="true">X-ray</button>
         <button type="button" data-look="solid" aria-pressed="false">Solid</button>
+        <button type="button" data-look="blueprint" aria-pressed="false">Blueprint</button>
       </div>
+      <label class="check"><input type="checkbox" id="o_dims" checked>Measurements (blueprint)</label>
+      <label class="check"><input type="checkbox" id="o_scan" checked>Scan sweep</label>
       <div class="row"><span>Brightness</span><input type="range" id="bright" min="40" max="200" value="100"><output id="o_bright">100%</output></div>
     </section>
 
@@ -139,8 +144,10 @@ input[type=range]{width:100%;accent-color:var(--acc);margin:0}
       <div class="btns">
         <button type="button" class="ghost" id="stopBtn" hidden>Stop camera</button>
         <button type="button" class="ghost" id="flipBtn">Front / back camera</button>
+        <button type="button" class="ghost" id="shotBtn" hidden>Save photo</button>
       </div>
       <label class="check"><input type="checkbox" id="mirror" checked>Mirror view</label>
+      <label class="check"><input type="checkbox" id="lite">Lite mode (smoother on phones)</label>
       <p class="tip">The anatomy is a stylised model fitted to tracked face, hand and body points. It is for fun and learning, not a medical image.</p>
     </section>
   </aside>
@@ -184,10 +191,15 @@ function alongPoly(pts,n){
 }
 
 function drawScene(ctx,W,H,D,O){
-  const xray=O.look==='xray';
+  const xray=O.look==='xray',bp=O.look==='blueprint';
   const L=O.layers;
-  const lw=Math.max(1.3,W*0.0021);
-  const A=xray?Math.min(1,0.5*O.bright+0.12):Math.max(0.05,1-O.through);
+  const tm=O.time||0;
+  const lw=Math.max(bp?1.1:1.3,W*0.0021*(bp?0.8:1));
+  const A=bp?Math.min(1,0.4+0.5*O.bright):xray?Math.min(1,0.5*O.bright+0.12):Math.max(0.05,1-O.through);
+  // pixels per cm: from the distance between pupils (6.3 cm average), else from shoulder width (38 cm)
+  let cmScale=0,cmFace=false;
+  if(D.face&&D.face.length>=474){const dd=len(sub(D.face[468],D.face[473]));if(dd>8){cmScale=dd/6.3;cmFace=true;}}
+  else if(D.pose&&D.pose[11]&&D.pose[12]&&D.pose[11][2]>0.5&&D.pose[12][2]>0.5){const dd=len(sub(D.pose[11],D.pose[12]));if(dd>20)cmScale=dd/38;}
   const pal=xray?{
     bone:{fill:'rgba(205,230,255,0.16)',stroke:'rgba(196,228,255,0.95)',glow:'rgba(70,150,255,0.26)'},
     hole:{fill:null,stroke:'rgba(150,200,255,0.85)',glow:null},
@@ -195,7 +207,19 @@ function drawScene(ctx,W,H,D,O){
     muscle:{fill:'rgba(255,70,70,0.20)',stroke:'rgba(255,125,110,0.85)',glow:'rgba(255,40,40,0.14)'},
     eye:{fill:'rgba(235,248,255,0.5)',stroke:'rgba(255,255,255,0.95)',glow:'rgba(120,190,255,0.28)'},
     tooth:{edge:'rgba(70,150,255,0.30)',face:'rgba(228,242,255,0.9)'},
-    pupil:'rgba(120,190,255,0.95)'
+    pupil:'rgba(120,190,255,0.95)',
+    organ:{fill:'rgba(120,200,255,0.16)',stroke:'rgba(160,225,255,0.85)',glow:'rgba(60,160,255,0.20)'},
+    heart:{fill:'rgba(255,70,105,0.55)',stroke:'rgba(255,170,190,1)',glow:'rgba(255,40,90,0.45)'}
+  }:bp?{
+    bone:{fill:'rgba(255,255,255,0.05)',stroke:'rgba(235,246,255,0.95)',glow:null},
+    hole:{fill:'rgba(8,40,100,0.55)',stroke:'rgba(235,246,255,0.9)',glow:null},
+    brain:{fill:'rgba(160,215,255,0.07)',stroke:'rgba(170,220,255,0.9)',glow:null},
+    muscle:{fill:'rgba(255,255,255,0.03)',stroke:'rgba(200,225,255,0.75)',glow:null},
+    eye:{fill:'rgba(255,255,255,0.08)',stroke:'rgba(255,255,255,0.95)',glow:null},
+    tooth:{edge:'rgba(235,246,255,0.95)',face:'#0f4aa6'},
+    pupil:'rgba(255,255,255,0.95)',
+    organ:{fill:'rgba(160,215,255,0.06)',stroke:'rgba(175,225,255,0.9)',glow:null},
+    heart:{fill:'rgba(255,224,138,0.10)',stroke:'rgba(255,224,138,0.95)',glow:null}
   }:{
     bone:{fill:'#e9e3d1',stroke:'#7d7459',glow:null},
     hole:{fill:'#3a342a',stroke:'#6b6350',glow:null},
@@ -203,19 +227,77 @@ function drawScene(ctx,W,H,D,O){
     muscle:{fill:'#a8302f',stroke:'#6e1b1c',glow:null},
     eye:{fill:'#f6f4ee',stroke:'#5d5d58',glow:null},
     tooth:{edge:'#7d7459',face:'#f4efdf'},
-    pupil:'#25231f'
+    pupil:'#25231f',
+    organ:{fill:'#e9b3ab',stroke:'#a8645f',glow:null},
+    heart:{fill:'#b3262e',stroke:'#6e1018',glow:null}
   };
   const labels=[];
+  const fsd=Math.max(10,W*0.0125);
+  const sysFont='system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+
+  /* blueprint paper: blue sheet, centimetre grid, ruler, frame */
+  if(bp){
+    ctx.save();
+    ctx.fillStyle='rgba(10,58,148,'+((1-O.through)*0.93).toFixed(3)+')';
+    ctx.fillRect(0,0,W,H);
+    let sp=cmScale||W/40;
+    while(sp<9)sp*=5;
+    sp=Math.round(sp*2)/2;
+    const nx=Math.ceil(W/2/sp),ny=Math.ceil(H/2/sp);
+    ctx.beginPath();
+    for(let i=-nx;i<=nx;i++)if(i%5){const x=W/2+i*sp;ctx.moveTo(x,0);ctx.lineTo(x,H);}
+    for(let i=-ny;i<=ny;i++)if(i%5){const y=H/2+i*sp;ctx.moveTo(0,y);ctx.lineTo(W,y);}
+    ctx.lineWidth=1;ctx.strokeStyle='rgba(190,225,255,0.10)';ctx.stroke();
+    ctx.beginPath();
+    for(let i=-nx;i<=nx;i++)if(i%5===0){const x=W/2+i*sp;ctx.moveTo(x,0);ctx.lineTo(x,H);}
+    for(let i=-ny;i<=ny;i++)if(i%5===0){const y=H/2+i*sp;ctx.moveTo(0,y);ctx.lineTo(W,y);}
+    ctx.lineWidth=1;ctx.strokeStyle='rgba(190,225,255,0.24)';ctx.stroke();
+    const ins=W*0.008;
+    ctx.lineWidth=1.5;ctx.strokeStyle='rgba(235,246,255,0.55)';ctx.strokeRect(ins,ins,W-2*ins,H-2*ins);
+    if(cmScale&&O.dims){
+      const th=H*0.012;
+      ctx.beginPath();
+      for(let c=0;c*cmScale<W;c++){const x=c*cmScale,tall=c%10===0?2.2:c%5===0?1.5:1;ctx.moveTo(x,ins);ctx.lineTo(x,ins+th*tall);}
+      ctx.lineWidth=1;ctx.strokeStyle='rgba(235,246,255,0.75)';ctx.stroke();
+      ctx.font=Math.round(fsd*0.9)+'px '+sysFont;ctx.fillStyle='rgba(235,246,255,0.85)';ctx.textBaseline='top';
+      for(let c=10;c*cmScale<W-30;c+=10)ctx.fillText(c+' cm',c*cmScale+3,ins+th*2.4);
+    }
+    ctx.restore();
+  }
+
   ctx.save();
   ctx.lineJoin='round';ctx.lineCap='round';
   ctx.globalAlpha=A;
   ctx.globalCompositeOperation=xray?'lighter':'source-over';
 
+  // dimension line with end ticks and a measurement in the middle
+  function dimLine(a,b,off,txt){
+    const dv=sub(b,a),Ln=len(dv);if(Ln<10)return;
+    const n=nrm(dv),nn=[-n[1],n[0]];
+    const a2=add(a,mul(nn,off)),b2=add(b,mul(nn,off));
+    const ext=mul(nn,Math.sign(off)*fsd*0.6);
+    ctx.save();
+    ctx.setLineDash([lw*3,lw*3]);ctx.lineWidth=1;ctx.strokeStyle='rgba(235,246,255,0.7)';
+    ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(a2[0]+ext[0],a2[1]+ext[1]);ctx.moveTo(b[0],b[1]);ctx.lineTo(b2[0]+ext[0],b2[1]+ext[1]);ctx.stroke();
+    ctx.setLineDash([]);ctx.lineWidth=1.4;ctx.strokeStyle='rgba(255,255,255,0.95)';
+    ctx.beginPath();ctx.moveTo(a2[0],a2[1]);ctx.lineTo(b2[0],b2[1]);
+    for(const p of [a2,b2]){const t=mul(add(n,nn),fsd*0.38);ctx.moveTo(p[0]-t[0],p[1]-t[1]);ctx.lineTo(p[0]+t[0],p[1]+t[1]);}
+    ctx.stroke();
+    ctx.font='600 '+fsd+'px '+sysFont;ctx.textAlign='center';ctx.textBaseline='middle';
+    const m=mid(a2,b2),tw=ctx.measureText(txt).width;
+    ctx.fillStyle='rgba(8,44,110,0.95)';ctx.fillRect(m[0]-tw/2-5,m[1]-fsd*0.75,tw+10,fsd*1.5);
+    ctx.fillStyle='#fff';ctx.fillText(txt,m[0],m[1]);
+    ctx.restore();
+  }
+  const cm=px=>(px/cmScale).toFixed(1)+' cm';
+
   function paint(kind,fill,wMul){
     const P=pal[kind], m=wMul||1;
     if(fill!==false&&P.fill){ctx.fillStyle=P.fill;ctx.fill();}
     if(P.glow){ctx.lineWidth=lw*(2+1.2*m);ctx.strokeStyle=P.glow;ctx.stroke();}
+    if(bp&&kind==='muscle')ctx.setLineDash([lw*5,lw*3]);
     ctx.lineWidth=lw*m;ctx.strokeStyle=P.stroke;ctx.stroke();
+    if(bp)ctx.setLineDash([]);
   }
   function smoothPath(pts,closed,keep){
     const n=pts.length;
@@ -260,7 +342,10 @@ function drawScene(ctx,W,H,D,O){
     let u=nrm(sub(g(454),g(234)));if(u[0]<0)u=[-u[0],-u[1]];
     const d=[-u[1],u[0]];
     const F=O.fit,k=F.size;
-    const o=add(g(168),add(mul(u,F.dx*sw/14),mul(d,F.dy*sw/14)));
+    // when the head turns, the skull stays between the ears instead of following the nose
+    const earMid=mid(g(234),g(454));
+    const turn=dot(sub(earMid,g(168)),u);
+    const o=add(add(g(168),mul(u,turn*0.7)),add(mul(u,F.dx*sw/14),mul(d,F.dy*sw/14)));
     const Lc=(a,b)=>add(o,add(mul(u,a*sw*k*F.w),mul(d,b*sh*k*F.h)));
     const jawL2R=dot(sub(g(454),g(234)),u)>0?FACE.jaw.map(g):FACE.jaw.map(g).reverse();
     const mc=mid(g(13),g(14));
@@ -380,6 +465,22 @@ function drawScene(ctx,W,H,D,O){
       }
       labels.push({t:'Eyeball',p:eyeC(eyeLeft),side:'L'});
     }
+    // blueprint annotations: centre line and measured dimensions
+    if(bp){
+      const top=add(g(10),mul(d,-sh*0.22)),bot=add(g(152),mul(d,sh*0.22));
+      ctx.save();
+      ctx.setLineDash([lw*12,lw*3,lw*2,lw*3]);ctx.lineWidth=1;ctx.strokeStyle='rgba(255,255,255,0.7)';
+      ctx.beginPath();ctx.moveTo(top[0],top[1]);ctx.lineTo(bot[0],bot[1]);ctx.stroke();
+      ctx.setLineDash([]);ctx.font='600 '+fsd+'px '+sysFont;ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='bottom';
+      ctx.fillText('CL',top[0],top[1]-3);
+      ctx.restore();
+      if(O.dims&&cmScale){
+        const a=g(234),b=g(454);
+        const up=-sh*0.95;
+        dimLine(a,b,(a[1]+(-u[1])*0 + d[1]*up<fsd*3)?sh*0.62:up,cm(len(sub(b,a))));
+        dimLine(g(10),g(152),-sw*0.72,cm(len(sub(g(152),g(10)))));
+      }
+    }
   }
 
   /* ---------------- hand ---------------- */
@@ -434,6 +535,7 @@ function drawScene(ctx,W,H,D,O){
     const td=nrm(sub(Hc,S)),TL=len(sub(Hc,S));
     const at=(t,x)=>add(S,add(mul(td,TL*t),mul(u,x||0)));
     const sideOf=p=>p[0]<W/2?'L':'R';
+    if(bp&&O.dims&&cmScale)dimLine(sA,sB,-sw*0.2,cm(sw));
 
     if(L.muscles){
       const Nk=sub(S,mul(td,sw*0.55));
@@ -454,6 +556,34 @@ function drawScene(ctx,W,H,D,O){
       labels.push({t:'Pectoralis major',p:add(S,add(mul(td,sw*0.4),mul(u,sw*0.2))),side:'R'});
     }
 
+    if(L.organs){
+      const br=Math.sin(tm*1.5),hs=O.mirror?-1:1,bre=1+0.05*br;
+      // trachea and main bronchi
+      const tTop=sub(S,mul(td,sw*0.35)),bif=at(0.16,0);
+      bone2(tTop,bif,sw*0.05,{kind:'organ',gA:0,gB:0,belly:0});
+      for(const sg of [-1,1])bone2(bif,at(0.25,sg*sw*0.17),sw*0.03,{kind:'organ',gA:0,gB:0.05,belly:0});
+      // lungs, expanding as you breathe
+      for(const sg of [-1,1]){
+        const wsc=sg===hs?0.86:1,X=f=>sg*sw*f*bre*wsc;
+        smoothPath([at(0.07,X(0.07)),at(0.09,X(0.2)),at(0.17,X(0.36)),at(0.33,X(0.45)),at(0.5+0.025*br,X(0.4)),at(0.58+0.03*br,X(0.22)),at(0.52+0.03*br,X(0.07)),at(0.3,X(0.08))],true);
+        paint('organ',true,1);
+        ctx.lineWidth=lw*0.7;ctx.strokeStyle=pal.organ.stroke;
+        for(const [t1,x1] of [[0.28,0.3],[0.38,0.32],[0.47,0.24]]){
+          const p0=at(0.2,X(0.05)),p1=at(t1,X(x1));
+          ctx.beginPath();ctx.moveTo(p0[0],p0[1]);ctx.lineTo(p1[0],p1[1]);ctx.stroke();
+        }
+      }
+      // heart, beating about 72 times a minute
+      const ph=tm*7.6,pulse=Math.pow(Math.max(0,Math.sin(ph)),8)+0.6*Math.pow(Math.max(0,Math.sin(ph-0.9)),8);
+      const hc=at(0.34,hs*sw*0.1),hr=sw*0.15*(1+0.12*pulse);
+      const hp=[[-.55,-.35],[-.15,-.62],[.3,-.5],[.58,-.15],[.38,.32],[0,.78],[-.35,.35]].map(q=>add(hc,add(mul(u,hs*(q[0]+0.28*q[1])*hr),mul(td,q[1]*hr))));
+      smoothPath(hp,true);paint('heart',true,1.3);
+      const lungP=at(0.3,-hs*sw*0.33),heartP=hc,trP=lerp(tTop,bif,0.4);
+      labels.push({t:'Lung',p:lungP,side:sideOf(lungP)});
+      labels.push({t:'Heart',p:heartP,side:sideOf(heartP)});
+      labels.push({t:'Trachea',p:trP,side:sideOf(trP)});
+    }
+
     if(L.body){
       // spine (neck to pelvis)
       const top=(V(7)&&V(8))?mid(P[7],P[8]):sub(S,mul(td,sw*0.75));
@@ -470,11 +600,12 @@ function drawScene(ctx,W,H,D,O){
         const sp=at(t,0);
         const hw=sw*(0.36+0.17*Math.sin(Math.PI*Math.min(1,0.25+f*0.8)))*(1-0.25*Math.max(0,f-0.6));
         for(const sg of [-1,1]){
-          const ctrl=add(sp,add(mul(u,sg*hw*1.2),mul(td,TL*0.012)));
-          const end=add(sp,mul(td,TL*0.075));
+          const ctrl=add(sp,add(mul(u,sg*hw*1.25),mul(td,TL*0.02)));
+          const end=add(sp,add(mul(td,TL*(0.13+0.03*(1-f))),mul(u,sg*sw*0.16*Math.max(0,f-0.45))));
           ctx.beginPath();ctx.moveTo(sp[0],sp[1]);ctx.quadraticCurveTo(ctrl[0],ctrl[1],end[0],end[1]);
-          if(pal.bone.glow){ctx.lineWidth=lw*5;ctx.strokeStyle=pal.bone.glow;ctx.stroke();}
-          ctx.lineWidth=lw*2.2;ctx.strokeStyle=pal.bone.stroke;ctx.stroke();
+          const rl=L.organs?0.45:1;
+          if(pal.bone.glow){ctx.lineWidth=lw*5*rl;ctx.strokeStyle=pal.bone.glow;ctx.stroke();}
+          ctx.lineWidth=lw*2.2*rl;ctx.strokeStyle=pal.bone.stroke;ctx.stroke();
         }
       }
       // sternum + clavicles
@@ -523,7 +654,7 @@ function drawScene(ctx,W,H,D,O){
   }
 
   /* ---------------- run ---------------- */
-  if(D.pose&&(L.body||L.muscles))drawBody(D.pose);
+  if(D.pose&&(L.body||L.muscles||L.organs))drawBody(D.pose);
   if(D.face&&(L.skull||L.brain||L.eyes||L.muscles))drawFace(D.face);
   if(D.hands&&L.hands)D.hands.forEach((h,i)=>drawHand(h,i===0));
   ctx.restore();
@@ -539,7 +670,7 @@ function drawScene(ctx,W,H,D,O){
         .sort((a,b)=>a.p[1]-b.p[1]);
       let y=-1e9;
       for(const l of arr){l.y=Math.max(l.p[1],y+fs*1.5);y=l.y;}
-      let yMax=H-fs;
+      let yMax=H-fs-(bp&&side==='R'?H*0.13:0);
       for(let i=arr.length-1;i>=0;i--){arr[i].y=Math.min(arr[i].y,yMax);yMax=arr[i].y-fs*1.5;}
       for(const l of arr){
         const tw=ctx.measureText(l.t).width;
@@ -554,6 +685,34 @@ function drawScene(ctx,W,H,D,O){
     }
     ctx.restore();
   }
+
+  /* blueprint title block */
+  if(bp){
+    ctx.save();
+    const bw=W*0.25,bh=H*0.105,bx=W-W*0.008*2-bw,by=H-H*0.008*2-bh,f1=Math.max(10,W*0.0115);
+    ctx.fillStyle='rgba(8,44,110,0.92)';ctx.fillRect(bx,by,bw,bh);
+    ctx.lineWidth=1.5;ctx.strokeStyle='rgba(235,246,255,0.9)';ctx.strokeRect(bx,by,bw,bh);
+    ctx.beginPath();ctx.moveTo(bx,by+bh*0.46);ctx.lineTo(bx+bw,by+bh*0.46);ctx.moveTo(bx+bw*0.55,by+bh*0.46);ctx.lineTo(bx+bw*0.55,by+bh);ctx.lineWidth=1;ctx.stroke();
+    ctx.textBaseline='middle';ctx.textAlign='left';ctx.fillStyle='#fff';
+    ctx.font='700 '+(f1*1.25)+'px '+sysFont;ctx.fillText('ANATOMICAL SHEET',bx+bw*0.04,by+bh*0.23);
+    ctx.font=f1+'px '+sysFont;ctx.fillStyle='rgba(235,246,255,0.9)';
+    ctx.fillText(cmScale?'SCALE 1:1  (grid 1 cm)':'SCALE  not calibrated',bx+bw*0.04,by+bh*0.73);
+    ctx.fillText(new Date().toISOString().slice(0,10),bx+bw*0.59,by+bh*0.62);
+    ctx.fillText('SHEET 1 / 1',bx+bw*0.59,by+bh*0.84);
+    ctx.restore();
+  }
+
+  /* scan sweep */
+  if(O.scan){
+    ctx.save();
+    const per=3.4,y=((tm%per)/per)*H*1.2-H*0.1,bandH=H*0.07;
+    const gr=ctx.createLinearGradient(0,y-bandH,0,y);
+    gr.addColorStop(0,'rgba(140,215,255,0)');gr.addColorStop(1,bp?'rgba(255,255,255,0.30)':'rgba(140,215,255,0.38)');
+    ctx.globalCompositeOperation='lighter';
+    ctx.fillStyle=gr;ctx.fillRect(0,y-bandH,W,bandH);
+    ctx.fillStyle=bp?'rgba(255,255,255,0.55)':'rgba(190,235,255,0.7)';ctx.fillRect(0,y,W,Math.max(1.5,lw));
+    ctx.restore();
+  }
 }
 /* ==END PURE== */
 </script>
@@ -566,8 +725,10 @@ const stage=$('stage'),real=$('real'),xr=$('xr'),xrLayer=$('xrLayer'),ov=$('ov')
 const gate=$('gate'),gateMsg=$('gateMsg'),startBtn=$('startBtn');
 const ctx=ov.getContext('2d');
 
-const S={layers:{skull:true,brain:true,muscles:false,eyes:true,hands:true,body:true,labels:true},
-  look:'xray',bright:1,through:.25,fit:{size:1,w:1,h:1,dx:0,dy:0},mirror:true,facing:'user'};
+const S={layers:{skull:true,brain:true,muscles:false,eyes:true,hands:true,body:true,organs:false,labels:true},
+  look:'xray',bright:1,through:.25,fit:{size:1,w:1,h:1,dx:0,dy:0},mirror:true,facing:'user',
+  scan:true,dims:true,lite:false};
+const LOOK_THROUGH={xray:25,solid:50,blueprint:8};
 
 /* ---------- UI wiring ---------- */
 function setChip(text,warn){
@@ -579,7 +740,7 @@ function applyLook(){
   xrLayer.style.display=xray?'block':'none';
   xrLayer.style.opacity=String(1-S.through);
   xr.style.filter='grayscale(1) invert(1) contrast(1.5) brightness('+(0.55*S.bright+0.25).toFixed(2)+')';
-  ov.style.filter=xray?'':'brightness('+S.bright.toFixed(2)+')';
+  ov.style.filter=S.look==='solid'?'brightness('+S.bright.toFixed(2)+')':'';
   for(const b of document.querySelectorAll('#looks button'))b.setAttribute('aria-pressed',String(b.dataset.look===S.look));
 }
 function bindRange(id,fn,fmt){
@@ -589,7 +750,10 @@ function bindRange(id,fn,fmt){
   return {set(v){el.value=v;upd();}};
 }
 bindRange('bright',v=>{S.bright=v/100;applyLook();},v=>v+'%');
-bindRange('through',v=>{S.through=v/100;applyLook();},v=>v+'%');
+const throughCtl=bindRange('through',v=>{S.through=v/100;applyLook();},v=>v+'%');
+$('o_scan').addEventListener('change',e=>{S.scan=e.target.checked;});
+$('o_dims').addEventListener('change',e=>{S.dims=e.target.checked;});
+$('lite').addEventListener('change',e=>{S.lite=e.target.checked;});
 const fitCtl=[
   bindRange('f_size',v=>S.fit.size=v/100,v=>v+'%'),
   bindRange('f_w',v=>S.fit.w=v/100,v=>v+'%'),
@@ -602,10 +766,11 @@ for(const k of Object.keys(S.layers)){
   $('l_'+k).addEventListener('change',e=>{S.layers[k]=e.target.checked;syncPresets();ensureModels();});
 }
 const PRE={
-  skull:{skull:1,brain:0,muscles:0,eyes:1,hands:1,body:1},
-  brain:{skull:0,brain:1,muscles:0,eyes:1,hands:0,body:0},
-  muscles:{skull:0,brain:0,muscles:1,eyes:0,hands:0,body:1},
-  all:{skull:1,brain:1,muscles:1,eyes:1,hands:1,body:1}
+  skull:{skull:1,brain:0,muscles:0,eyes:1,hands:1,body:1,organs:0},
+  brain:{skull:0,brain:1,muscles:0,eyes:1,hands:0,body:0,organs:0},
+  muscles:{skull:0,brain:0,muscles:1,eyes:0,hands:0,body:1,organs:0},
+  organs:{skull:0,brain:0,muscles:0,eyes:0,hands:0,body:1,organs:1},
+  all:{skull:1,brain:1,muscles:1,eyes:1,hands:1,body:1,organs:1}
 };
 function syncPresets(){
   for(const b of document.querySelectorAll('#presets button')){
@@ -622,7 +787,7 @@ for(const b of document.querySelectorAll('#presets button')){
 }
 syncPresets();
 for(const b of document.querySelectorAll('#looks button')){
-  b.addEventListener('click',()=>{S.look=b.dataset.look;applyLook();});
+  b.addEventListener('click',()=>{S.look=b.dataset.look;throughCtl.set(LOOK_THROUGH[S.look]);applyLook();});
 }
 function setMirror(m){S.mirror=m;$('mirror').checked=m;stage.classList.toggle('mirror',m);sm.face=null;sm.hands=[];sm.pose=null;}
 $('mirror').addEventListener('change',e=>setMirror(e.target.checked));
@@ -659,7 +824,7 @@ async function startCam(){
   ov.width=vw;ov.height=vh;
   stage.style.setProperty('--ar',(vw/vh).toFixed(4));
   setMirror(S.facing==='user');
-  gate.hidden=true;$('stopBtn').hidden=false;$('fsBtn').hidden=false;
+  gate.hidden=true;$('stopBtn').hidden=false;$('fsBtn').hidden=false;$('shotBtn').hidden=false;
   setChip('Camera on. Loading tracking models…');
   ensureModels();
   if(!raf)raf=requestAnimationFrame(loop);
@@ -669,7 +834,7 @@ function stopCam(keepGate){
   real.srcObject=null;xr.srcObject=null;
   if(raf){cancelAnimationFrame(raf);raf=0;}
   if(ctx&&ov.width)ctx.clearRect(0,0,ov.width,ov.height);
-  if(!keepGate){gate.hidden=false;$('stopBtn').hidden=true;$('fsBtn').hidden=true;setChip('');}
+  if(!keepGate){gate.hidden=false;$('stopBtn').hidden=true;$('fsBtn').hidden=true;$('shotBtn').hidden=true;setChip('');}
   sm.face=null;sm.hands=[];sm.pose=null;
 }
 startBtn.addEventListener('click',startCam);
@@ -691,7 +856,7 @@ let raf=0,lastT=-1,lastTs=0;
 const need=()=>({
   face:S.layers.skull||S.layers.brain||S.layers.eyes||S.layers.muscles,
   hand:S.layers.hands,
-  pose:S.layers.body||S.layers.muscles
+  pose:S.layers.body||S.layers.muscles||S.layers.organs
 });
 async function getVision(){
   if(vision)return vision;
@@ -757,15 +922,58 @@ function detect(){
     }
   }catch(e){/* skip a bad frame */}
 }
+let frameN=0;
 function loop(){
   raf=requestAnimationFrame(loop);
   if(!stream||real.readyState<2)return;
-  if(real.currentTime!==lastT){lastT=real.currentTime;detect();}
+  frameN++;
+  if(real.currentTime!==lastT&&(!S.lite||frameN%2===0)){lastT=real.currentTime;detect();}
   const W=ov.width,H=ov.height;
   ctx.clearRect(0,0,W,H);
   drawScene(ctx,W,H,{face:sm.face,hands:sm.hands,pose:sm.pose},
-    {look:S.look,bright:S.bright,through:S.through,layers:S.layers,fit:S.fit});
+    {look:S.look,bright:S.bright,through:S.through,layers:S.layers,fit:S.fit,
+     time:performance.now()/1000,mirror:S.mirror,scan:S.scan,dims:S.dims});
 }
+
+/* ---------- save photo: camera picture + current look + overlay ---------- */
+$('shotBtn').addEventListener('click',()=>{
+  if(!stream||!vw)return;
+  const c=document.createElement('canvas');c.width=vw;c.height=vh;
+  const x=c.getContext('2d');
+  const drawVideo=()=>{
+    x.save();
+    if(S.mirror){x.translate(vw,0);x.scale(-1,1);}
+    x.drawImage(real,0,0,vw,vh);
+    x.restore();
+  };
+  x.fillStyle='#000';x.fillRect(0,0,vw,vh);
+  drawVideo();
+  if(S.look==='xray'){
+    x.save();
+    x.globalAlpha=1-S.through;
+    x.filter='grayscale(1) invert(1) contrast(1.5) brightness('+(0.55*S.bright+0.25).toFixed(2)+')';
+    x.save();
+    if(S.mirror){x.translate(vw,0);x.scale(-1,1);}
+    x.drawImage(real,0,0,vw,vh);
+    x.restore();
+    x.filter='none';
+    x.globalCompositeOperation='color';x.fillStyle='#2f86ff';x.fillRect(0,0,vw,vh);
+    x.restore();
+  }
+  x.save();
+  if(S.look==='solid')x.filter='brightness('+S.bright.toFixed(2)+')';
+  x.drawImage(ov,0,0);
+  x.restore();
+  const name='xray-mirror-'+S.look+'-'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')+'.png';
+  c.toBlob(b=>{
+    if(!b){setChip('Could not save the photo on this browser.',true);return;}
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(b);a.download=name;
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+    setChip('Photo saved.');setTimeout(()=>setChip(''),2500);
+  },'image/png');
+});
 })();
 </script>
 </body>
