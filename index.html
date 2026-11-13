@@ -982,7 +982,11 @@ function camError(e){
     return 'The camera needs a secure https page. This page is on '+location.protocol+'//'+location.host+'. Open the GitHub Pages https link in Chrome.';
   }
   switch(e&&e.name){
-    case 'NotAllowedError':case 'SecurityError':return 'Camera access was blocked. Allow the camera in the browser site settings, then press Start again.';
+    case 'NotAllowedError':case 'SecurityError':{
+      let inFrame=false;try{inFrame=window.self!==window.top;}catch(x){inFrame=true;}
+      if(inFrame)return 'This page is running inside another app or page, which blocks the camera ('+e.name+'). Open https://chaminda1992.github.io/X-Ray--mirror/ directly in Chrome, not from inside Claude.';
+      return 'The camera was refused ('+e.name+'). Check two places: 1) phone Settings, Apps, Chrome, Permissions, Camera must be Allow. 2) Chrome address bar lock icon, Permissions, Camera, Allow. Then reload and press Start again.';
+    }
     case 'NotFoundError':case 'OverconstrainedError':return 'No camera was found on this device.';
     case 'NotReadableError':return 'The camera is in use by another app. Close it and try again.';
     default:return 'Could not start the camera ('+((e&&e.name)||'unknown error')+').';
